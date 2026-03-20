@@ -1,4 +1,4 @@
-name: Build for Proot-Distro Ubuntu ARM64
+name: Build for ARM64 Linux (Proot-Distro)
 
 on:
   push:
@@ -13,7 +13,7 @@ env:
 
 jobs:
   build-arm64-linux:
-    runs-on: ubuntu-24.04-arm  # Native ARM64 runner (GitHub now provides these)
+    runs-on: ubuntu-24.04-arm  # Native ARM64 runner
     
     steps:
     - name: Checkout code
@@ -24,9 +24,8 @@ jobs:
       with:
         targets: aarch64-unknown-linux-gnu
 
-    - name: Install system dependencies (ARM64)
+    - name: Install system dependencies
       run: |
-        sudo dpkg --add-architecture arm64
         sudo apt-get update
         sudo apt-get install -y \
           software-properties-common \
@@ -36,13 +35,7 @@ jobs:
           libgtk-3-dev \
           libglib2.0-dev \
           libsoup-3.0-dev \
-          libwebkit2gtk-4.1-dev \
-          librust-atk-dev \
-          libgdk-pixbuf2.0-dev \
-          libcairo2-dev \
-          libpango1.0-dev \
-          curl \
-          git
+          libwebkit2gtk-4.1-dev
 
     - name: Cache Rust dependencies
       uses: Swatinem/rust-cache@v2
@@ -64,7 +57,7 @@ jobs:
         cp target/aarch64-unknown-linux-gnu/release/arnis arnis-linux-arm64-gui
         chmod +x arnis-linux-arm64-gui
 
-    - name: Test binary
+    - name: Test CLI binary
       run: |
         file arnis-linux-arm64-cli
         ./arnis-linux-arm64-cli --help
@@ -111,19 +104,17 @@ jobs:
         body: |
           ## ARM64 Linux Build for Proot-Distro
           
-          This release includes binaries built for ARM64 Linux (`aarch64-unknown-linux-gnu`), 
-          compatible with proot-distro Ubuntu on Android devices.
+          Compatible with proot-distro Ubuntu on Android devices (ARM64/AArch64).
           
           ### Files:
-          - **arnis-linux-arm64-cli**: Command-line only, lightweight, no GUI dependencies
+          - **arnis-linux-arm64-cli**: CLI-only, lightweight, no GUI dependencies
           - **arnis-linux-arm64-gui**: Full GUI version (requires display server)
           
           ### Usage in Proot-Distro:
           ```bash
-          # Download to your proot-distro
           wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/arnis-linux-arm64-cli
           chmod +x arnis-linux-arm64-cli
-          ./arnis-linux-arm64-cli --help
+          ./arnis-linux-arm64-cli --terrain --path="./world" --bbox="lat1,lng1,lat2,lng2"
           ```
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
