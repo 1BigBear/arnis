@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    # Native ARM64 runner provided by GitHub (GA as of 2025)
+    # Using the native ARM64 runner for 1:1 compatibility with PRoot ARM64
     runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout Code
@@ -16,13 +16,24 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev
+          # This list covers every link-time dependency: 
+          # SSL, GLib, GTK4 (Modern), SQLite3, and Pango for text rendering.
+          sudo apt-get install -y \
+            pkg-config \
+            libssl-dev \
+            libglib2.0-dev \
+            libgtk-4-dev \
+            libsqlite3-dev \
+            libpango1.0-dev \
+            libcairo2-dev \
+            libgraphene-1.0-dev
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build Arnis (Release)
-        run: cargo build --release
+        # Using --locked ensures it uses the exact dependency versions in the repo
+        run: cargo build --release --locked
 
       - name: Upload PRoot Binary
         uses: actions/upload-artifact@v4
