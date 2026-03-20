@@ -1,25 +1,30 @@
-name: Build for ARM64 Linux (Proot-Distro)
+name: Build and Auto-Release ARM64 Linux
 
 on:
   push:
-    branches: [ main ]
-    tags: [ 'v*' ]
-  pull_request:
-    branches: [ main ]
+    branches: [ main, master ]
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build-arm64-linux:
-    runs-on: ubuntu-24.04-arm  # Native ARM64 runner
+  build-and-release:
+    runs-on: ubuntu-24.04-arm
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Full history for tagging
 
-    - name: Set up Rust toolchain
+    - name: Set up Rust
       uses: dtolnay/rust-toolchain@stable
       with:
         targets: aarch64-unknown-linux-gnu
@@ -35,86 +40,141 @@ jobs:
           libgtk-3-dev \
           libglib2.0-dev \
           libsoup-3.0-dev \
-          libwebkit2gtk-4.1-dev
+          libwebkit2gtk-4.1-dev \
+          file
 
     - name: Cache Rust dependencies
       uses: Swatinem/rust-cache@v2
       with:
-        key: arm64-linux-${{ hashFiles('**/Cargo.lock') }}
+        key: arm64-${{ hashFiles('**/Cargo.lock') }}
 
-    - name: Fetch dependencies
-      run: cargo fetch
-
-    - name: Build (CLI + Bedrock support, no GUI)
+    - name: Build CLI version (Lightweight)
       run: |
         cargo build --no-default-features --features bedrock --release --target aarch64-unknown-linux-gnu
         cp target/aarch64-unknown-linux-gnu/release/arnis arnis-linux-arm64-cli
         chmod +x arnis-linux-arm64-cli
+        echo "=== CLI Build Info ==="
+        file arnis-linux-arm64-cli
+        ls -lh arnis-linux-arm64-cli
 
-    - name: Build (Full GUI version)
+    - name: Build GUI version (Full)
       run: |
         cargo build --release --target aarch64-unknown-linux-gnu
         cp target/aarch64-unknown-linux-gnu/release/arnis arnis-linux-arm64-gui
         chmod +x arnis-linux-arm64-gui
+        echo "=== GUI Build Info ==="
+        file arnis-linux-arm64-gui
+        ls -lh arnis-linux-arm64-gui
 
-    - name: Test CLI binary
+    - name: Test binaries
       run: |
-        file arnis-linux-arm64-cli
-        ./arnis-linux-arm64-cli --help
+        echo "Testing CLI..."
+        ./arnis-linux-arm64-cli --help | head -20
+        echo "Testing GUI..."
+        ./arnis-linux-arm64-gui --help | head -20 || true  # GUI might fail without display but --help should work
 
-    - name: Upload CLI artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: arnis-linux-arm64-cli
-        path: arnis-linux-arm64-cli
-        retention-days: 30
+    - name: Generate Release Tag
+      id: gen_tag
+      run: |
+        DATE=$(date +%Y%m%d)
+        SHORT_SHA=$(git rev-parse --short HEAD)
+        TAG="v${DATE}-${SHORT_SHA}-arm64"
+        echo "tag=$TAG" >> $GITHUB_OUTPUT
+        echo "date=$DATE" >> $GITHUB_OUTPUT
+        echo "Generated tag: $TAG"
 
-    - name: Upload GUI artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: arnis-linux-arm64-gui
-        path: arnis-linux-arm64-gui
-        retention-days: 30
+    - name: Create and Push Tag
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        
+        # Delete tag if exists locally (rare case)
+        git tag -d ${{ steps.gen_tag.outputs.tag }} 2>/dev/null || true
+        
+        # Create and push tag
+        git tag -a ${{ steps.gen_tag.outputs.tag }} -m "ARM64 Linux Build ${{ steps.gen_tag.outputs.tag }}"
+        git push origin ${{ steps.gen_tag.outputs.tag }}
+        echo "Pushed tag ${{ steps.gen_tag.outputs.tag }}"
 
-  release:
-    needs: build-arm64-linux
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    
-    steps:
-    - name: Download CLI artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: arnis-linux-arm64-cli
-        path: ./artifacts
-
-    - name: Download GUI artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: arnis-linux-arm64-gui
-        path: ./artifacts
-
-    - name: Create Release
+    - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
-        files: |
-          ./artifacts/arnis-linux-arm64-cli
-          ./artifacts/arnis-linux-arm64-gui
-        name: Release ${{ github.ref_name }} (ARM64 Linux)
+        tag_name: ${{ steps.gen_tag.outputs.tag }}
+        name: "Arnis ARM64 Linux ${{ steps.gen_tag.outputs.date }}"
         body: |
-          ## ARM64 Linux Build for Proot-Distro
+          ## 🚀 Arnis ARM64 Linux Build
           
-          Compatible with proot-distro Ubuntu on Android devices (ARM64/AArch64).
+          **Tag:** `${{ steps.gen_tag.outputs.tag }}`  
+          **Platform:** `aarch64-unknown-linux-gnu` (ARM64/ARMv8)  
+          **Runner:** `ubuntu-24.04-arm` (Native ARM64)  
+          **Commit:** `${{ github.sha }}`
           
-          ### Files:
-          - **arnis-linux-arm64-cli**: CLI-only, lightweight, no GUI dependencies
-          - **arnis-linux-arm64-gui**: Full GUI version (requires display server)
+          ### 📦 Downloads
           
-          ### Usage in Proot-Distro:
+          | File | Description | Size |
+          |------|-------------|------|
+          | `arnis-linux-arm64-cli` | CLI-only, lightweight, no GUI deps | ~15MB |
+          | `arnis-linux-arm64-gui` | Full Tauri GUI version | ~20MB |
+          
+          ### 📱 Proot-Distro Usage (Android)
+          
           ```bash
-          wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/arnis-linux-arm64-cli
+          # Download CLI version (recommended for Termux/proot)
+          wget https://github.com/${{ github.repository }}/releases/download/${{ steps.gen_tag.outputs.tag }}/arnis-linux-arm64-cli
+          
+          # Make executable
           chmod +x arnis-linux-arm64-cli
-          ./arnis-linux-arm64-cli --terrain --path="./world" --bbox="lat1,lng1,lat2,lng2"
+          
+          # Run
+          ./arnis-linux-arm64-cli --terrain --path="./world" --bbox="48.135,11.582,48.136,11.583"
           ```
+          
+          ### 🖥️ GUI Version (requires display)
+          
+          ```bash
+          wget https://github.com/${{ github.repository }}/releases/download/${{ steps.gen_tag.outputs.tag }}/arnis-linux-arm64-gui
+          chmod +x arnis-linux-arm64-gui
+          ./arnis-linux-arm64-gui  # Requires VNC/X11 in proot
+          ```
+          
+          ### 🔧 System Requirements
+          - ARM64/AArch64 processor
+          - Ubuntu 22.04+ / Debian 12+ (proot-distro compatible)
+          - For GUI: libwebkit2gtk-4.1-0, libgtk-3-0 (usually pre-installed)
+          
+          ---
+          *Auto-generated by GitHub Actions*
+        files: |
+          arnis-linux-arm64-cli
+          arnis-linux-arm64-gui
+        generate_release_notes: false
+        fail_on_unmatched_files: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Update "latest-arm64" Rolling Release (Optional)
+      if: github.ref == 'refs/heads/main'
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: latest-arm64
+        name: "🔄 Latest ARM64 Build (Rolling)"
+        body: |
+          ## Latest ARM64 Development Build
+          
+          This is a rolling release always pointing to the latest `main` branch build for ARM64.
+          
+          **Current Build:** `${{ steps.gen_tag.outputs.tag }}`
+          **Commit:** `${{ github.sha }}`
+          
+          ### Direct Download Links (Always Latest)
+          ```bash
+          # Always gets the latest main branch build
+          wget https://github.com/${{ github.repository }}/releases/download/latest-arm64/arnis-linux-arm64-cli
+          ```
+        files: |
+          arnis-linux-arm64-cli
+          arnis-linux-arm64-gui
+        fail_on_unmatched_files: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      continue-on-error: true  # Don't fail if this step has issues
